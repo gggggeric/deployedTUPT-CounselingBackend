@@ -10,6 +10,14 @@ def init_routes(app):
             'message': 'TUPT Counseling Scheduler API',
             'status': 'active'
         })
+  
+    @app.route('/ping', methods=['GET'])
+    def ping():
+        return jsonify({
+            "status": "ok",
+            "message": "✅ Server is alive!",
+            "timestamp": __import__('datetime').datetime.utcnow().isoformat()
+        }), 200
 
     @app.route('/register', methods=['POST'])
     def register():
