@@ -1,7 +1,8 @@
 from flask import jsonify, request
-from database import find_user_by_username, find_user_by_id_number, insert_user, insert_appointment, find_appointments_by_user_id, update_appointment_status, get_all_appointments, find_user_by_id, find_appointment_by_id, get_appointments_with_user_details
+from database import find_user_by_username, find_user_by_id_number, insert_user, insert_appointment, find_appointments_by_user_id, update_appointment_status, get_all_appointments, find_user_by_id, find_appointment_by_id, get_appointments_with_user_details, update_appointment_attended
 from models import User, Appointment
 from bson import ObjectId
+from datetime import datetime
 
 def init_routes(app):
     @app.route('/')
@@ -244,7 +245,7 @@ def init_routes(app):
                     'message': f'Status must be one of: {", ".join(valid_statuses)}'
                 }), 400
             
-            # SIMPLE: Just update the status directly
+            # Update the status
             success, message = update_appointment_status(appointment_id, data['status'])
             
             if success:
@@ -259,8 +260,83 @@ def init_routes(app):
                 }), 400
                 
         except Exception as e:
+            print(f"❌ Error updating appointment status: {e}")
             return jsonify({
                 'message': 'Error updating appointment status',
+                'error': str(e)
+            }), 500
+
+    @app.route('/appointments/<appointment_id>/attended', methods=['PUT'])
+    def mark_appointment_attended(appointment_id):
+        try:
+            data = request.get_json()
+            
+            if not data or data.get('attended') is None:
+                return jsonify({
+                    'message': 'attended status is required (true/false)'
+                }), 400
+            
+            attended_status = data.get('attended')
+            
+            # Validate that attended_status is boolean
+            if not isinstance(attended_status, bool):
+                return jsonify({
+                    'message': 'attended must be a boolean value (true/false)'
+                }), 400
+            
+            # Get the appointment to check conditions
+            appointment_result = find_appointment_by_id(appointment_id)
+            if isinstance(appointment_result, tuple):
+                appointment, error_msg = appointment_result
+            else:
+                appointment, error_msg = appointment_result, None
+                
+            if not appointment:
+                return jsonify({
+                    'message': 'Appointment not found',
+                    'error': error_msg
+                }), 404
+            
+            # Check if the appointment is in the past or today
+            from datetime import datetime, date
+            
+            # Parse appointment date (assuming format YYYY-MM-DD)
+            try:
+                appointment_date = datetime.strptime(appointment.date, '%Y-%m-%d').date()
+                current_date = datetime.utcnow().date()
+                
+                # Only allow marking attendance for past or current date appointments
+                if appointment_date > current_date:
+                    return jsonify({
+                        'message': 'Cannot mark attendance for future appointments',
+                        'error': 'Appointment date is in the future'
+                    }), 400
+                    
+            except ValueError:
+                # If date parsing fails, proceed anyway (might be different format)
+                print("Warning: Could not parse appointment date for validation")
+            
+            # REMOVED: No longer checking appointment status - allow any status for today's appointments
+            
+            # Update the attended status
+            success, message = update_appointment_attended(appointment_id, attended_status)
+            
+            if success:
+                action = "marked as attended" if attended_status else "marked as not attended"
+                return jsonify({
+                    'message': f'Appointment {action} successfully',
+                    'attended': attended_status
+                }), 200
+            else:
+                return jsonify({
+                    'message': 'Failed to update attendance status',
+                    'error': message
+                }), 400
+                
+        except Exception as e:
+            print(f"❌ Error updating attendance status: {e}")
+            return jsonify({
+                'message': 'Error updating attendance status',
                 'error': str(e)
             }), 500
         
@@ -396,6 +472,7 @@ def init_routes(app):
                     'status': apt.get('status', 'N/A'),
                     'concern_type': apt.get('concern_type', 'N/A'),
                     'preferred_time': apt.get('preferred_time', 'N/A'),
+                    'attended': apt.get('attended', 'N/A'),
                     'created_at': apt.get('created_at', 'N/A')
                 }
                 serialized_appointments.append(serialized_apt)
@@ -427,6 +504,33 @@ def init_routes(app):
             return jsonify({
                 'users': serialized_users,
                 'count': len(serialized_users)
+            }), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    # Admin debug endpoint
+    @app.route('/debug/admin-appointments', methods=['GET'])
+    def debug_admin_appointments():
+        try:
+            from database import mongo
+            appointments = list(mongo.db.appointments.find())
+            
+            serialized_appointments = []
+            for apt in appointments:
+                serialized_apt = {
+                    '_id': str(apt['_id']),
+                    'user_id': apt.get('user_id', 'N/A'),
+                    'date': apt.get('date', 'N/A'),
+                    'status': apt.get('status', 'N/A'),
+                    'concern_type': apt.get('concern_type', 'N/A'),
+                    'preferred_time': apt.get('preferred_time', 'N/A'),
+                    'attended': apt.get('attended', False)
+                }
+                serialized_appointments.append(serialized_apt)
+            
+            return jsonify({
+                'appointments': serialized_appointments,
+                'count': len(serialized_appointments)
             }), 200
         except Exception as e:
             return jsonify({'error': str(e)}), 500

@@ -30,7 +30,7 @@ class User(UserMixin):
             'id_number': self.id_number,
             'birthdate': self.birthdate,
             'role': self.role,
-            '_id': str(self._id),
+            '_id': self._id,  # Keep as ObjectId for database consistency
             'created_at': self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at
         }
 
@@ -39,7 +39,10 @@ class User(UserMixin):
         # Handle _id conversion
         _id = data.get('_id')
         if _id and not isinstance(_id, ObjectId):
-            _id = ObjectId(_id)
+            try:
+                _id = ObjectId(_id)
+            except:
+                _id = _id  # Keep as string if conversion fails
         
         # Handle created_at conversion
         created_at = data.get('created_at')
@@ -61,12 +64,18 @@ class User(UserMixin):
 
 
 class Appointment:
-    def __init__(self, user_id, date, preferred_time, concern_type, status="Pending", _id=None, created_at=None):
-        self.user_id = user_id
+    def __init__(self, user_id, date, preferred_time, concern_type, status="Pending", attended=False, _id=None, created_at=None):
+        # Convert user_id to ObjectId if it's a valid ObjectId string, otherwise keep as string
+        if user_id and ObjectId.is_valid(user_id):
+            self.user_id = ObjectId(user_id)
+        else:
+            self.user_id = user_id
+            
         self.date = date
         self.preferred_time = preferred_time
         self.concern_type = concern_type
         self.status = status  # 'Pending', 'Approved', 'Rejected', 'Cancelled', 'Completed'
+        self.attended = attended  # New field to track if user attended
         self._id = _id or ObjectId()
         self.created_at = created_at or datetime.utcnow()
 
@@ -98,7 +107,8 @@ class Appointment:
             'preferred_time': self.preferred_time,
             'concern_type': self.concern_type,
             'status': self.status,
-            '_id': str(self._id),
+            'attended': self.attended,
+            '_id': self._id,
             'created_at': current_created_at.isoformat() if isinstance(current_created_at, datetime) else current_created_at,
             'formatted_created_at': formatted_created_at
         }
@@ -108,7 +118,15 @@ class Appointment:
         # Handle _id conversion
         _id = data.get('_id')
         if _id and not isinstance(_id, ObjectId):
-            _id = ObjectId(_id)
+            try:
+                _id = ObjectId(_id)
+            except:
+                _id = _id  # Keep as string if conversion fails
+        
+        # Handle user_id conversion - ensure consistency
+        user_id = data.get('user_id')
+        if user_id and ObjectId.is_valid(user_id) and not isinstance(user_id, ObjectId):
+            user_id = ObjectId(user_id)
         
         # Handle created_at conversion from string to datetime if needed
         created_at = data.get('created_at')
@@ -119,11 +137,12 @@ class Appointment:
                 created_at = datetime.utcnow()
         
         return cls(
-            user_id=data['user_id'],
+            user_id=user_id,
             date=data['date'],
             preferred_time=data['preferred_time'],
             concern_type=data['concern_type'],
-            status=data.get('status', 'Pending'),  # Default to 'Pending'
+            status=data.get('status', 'Pending'),
+            attended=data.get('attended', False),
             _id=_id,
             created_at=created_at
         )
